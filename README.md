@@ -1,55 +1,89 @@
-# RedisCrudDriver
+# Foobara::RedisCrudDriver
 
-TODO: Delete this and the text below, and describe your gem
-
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library
-into a gem. Put your Ruby code in the file `lib/redis_crud_driver`. To experiment with that code, run `bin/console` for
-an interactive prompt.
+`foobara-redis-crud-driver` is a Redis CRUD driver for Foobara.
 
 ## Installation
 
-From this directory, run the following:
+Add `gem "foobara-redis-crud-driver"` to your Gemfile or .gemspec file and `bundle install`. 
 
-```
-bundle config set local.foobara ../foobara
-bundle config set disable_local_branch_check true
-```
-
-NOTE: you don´t need to do this because it is already done, but when setting up a new project, you need to
-put a valid private key in REDIS_CRUD_DRIVER_KEY_FOR_FOOBARA in gitub actions secrets for this
-repository.
-
-You can copy the key with something like `cat ~/.ssh/<private_key_you_want_to_use> | xclip`
-
-TODO: Replace `UPDATE_WITH_YOUR_GEM_NAME_PRIOR_TO_RELEASE_TO_RUBYGEMS_ORG` with your gem name right after releasing it
-to RubyGems.org. Please do not do it earlier due to security reasons. Alternatively, replace this section with
-instructions to install your gem from git if you don't plan to release to RubyGems.org.
-
-Install the gem and add to the application's Gemfile by executing:
-
-    $ bundle add UPDATE_WITH_YOUR_GEM_NAME_PRIOR_TO_RELEASE_TO_RUBYGEMS_ORG
-
-If bundler is not being used to manage dependencies, install the gem by executing:
-
-    $ gem install UPDATE_WITH_YOUR_GEM_NAME_PRIOR_TO_RELEASE_TO_RUBYGEMS_ORG
+Or even just `gem install foobara-redis-crud-driver` if just playing with it directly in the scripts.
 
 ## Usage
 
-TODO: Write usage instructions here
+Save the code below in a file such as `widget_example.rb`. This sets up the Redis CRUD driver, defines a `Widget` entity plus two commands: one to create a widget and one to find it.
 
-## Development
+```ruby
+require "foobara/redis_crud_driver" # require the driver
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can
-also run `bin/console` for an interactive prompt that will allow you to experiment.
+driver = Foobara::RedisCrudDriver.new(ENV.fetch("REDIS_URL"), key_prefix: "my_app")
+Foobara::Persistence.default_crud_driver = driver # set the driver as Foobara's default CRUD driver for saving entities
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the
-version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version,
-push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+class Widget < Foobara::Entity
+  attributes do
+    id :integer
+    name :string, :required
+  end
+
+  primary_key :id
+end
+
+class CreateWidget < Foobara::Command
+  inputs Widget.attributes_for_create
+  result Widget
+
+  def execute
+    Widget.create(inputs)
+  end
+end
+
+class FindWidget < Foobara::Command
+  inputs do
+    id Widget.primary_key_type, :required
+  end
+  result Widget
+
+  def execute
+    Widget.load(id)
+  end
+end
+
+widget = CreateWidget.run!(name: "Example")
+puts FindWidget.run!(id: widget.id).name # => "Example"
+```
+
+Running the command below in your project folder will print `Example` as the output signifying that the widget is now stored in Redis. 
+
+```sh
+REDIS_URL=redis://localhost:6379 ruby widget_example.rb
+```
+
+### Things to know
+
+- **Use commands, or open a transaction**. Foobara requires an open transaction for successful entity CRUD operations. The commands in the example above open one for you. If you call `Widget.create` or `Widget.load` directly, outside a command, you need to have opened a Foobara transaction yourself.
+- **Key prefix** `key_prefix:` keeps this driver's keys under your own label. If several apps share one Redis, give each its own. The older name `prefix:` still works for compatibility but is deprecated, so use `key_prefix:`.
+
+### Choosing how to connect
+
+The first argument to `Foobara::RedisCrudDriver.new` can be any of these:
+
+- **A Redis URL**, like in the above example
+- **An existing `Redis` client** you've already created.
+- **A credentials hash**, which is anything `Redis.new` accepts.
+You can also leave the connection out. The driver then reads `ENV["REDIS_URL"]` itself. If that variable isn't set either, it raises `Foobara::RedisCrudDriver::NoRedisUrlError`.
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/[USERNAME]/redis_crud_driver.
+Bug reports and pull requests are always welcome at [github.com/foobara/redis-crud-driver](https://github.com/foobara/redis-crud-driver).
 
-### Licensing
+To work on an existing issue or submit a Pull Request:
 
-This project is licensed under the Mozilla Public License Version 2.0. Please see LICENSE.txt for more info.
+1. Fork the repository and clone it to your local machine
+2. Run `bundle install` to install dependencies
+3. Start a Redis server and run `rake` to ensure that everything works as expected before making any changes
+4. Implement your changes
+5. Restart the Redis server and re-run `rake` to make sure that all tests and Rubocop pass
+6. Commit your changes, push to GitHub and open a Pull Request for review
+
+## License
+
+This project is licensed under the MPL-2.0 license. Please see [LICENSE.txt](LICENSE.txt) for more information.
